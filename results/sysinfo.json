@@ -1,0 +1,10 @@
+﻿{
+    "CPU":  "AMD Ryzen 9 7900X 12-Core Processor             (12 cores / 24 threads)",
+    "RAM":  "63.2 GB",
+    "OS":  "Microsoft Windows 11 Enterprise (Build 26200)",
+    "GPUs":  "NVIDIA GeForce RTX 3060 - 4 GB VRAM (driver 32.0.15.7688); NVIDIA GeForce RTX 3060 - 4 GB VRAM (driver 32.0.15.7688)",
+    "NvidiaSMI":  "NVIDIA GeForce RTX 3060, 12288 MiB, 576.88, 8.6; NVIDIA GeForce RTX 3060, 12288 MiB, 576.88, 8.6",
+    "CUDADevices":  "ggml_cuda_init: found 2 CUDA devices (Total VRAM: 24575 MiB): |   Device 0: NVIDIA GeForce RTX 3060, compute capability 8.6, VMM: yes, VRAM: 12287 MiB |   Device 1: NVIDIA GeForce RTX 3060, compute capability 8.6, VMM: yes, VRAM: 12287 MiB | Available devices:",
+    "Disk":  "ADATA LEGEND 900 (954 GB)",
+    "Fecha":  "2026-08-16 19:28"
+}

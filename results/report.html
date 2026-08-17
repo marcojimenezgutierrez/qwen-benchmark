@@ -1,0 +1,395 @@
+<title>Qwen3.8-27B en 2x RTX 3060</title>
+<style>
+  :root{
+    --bg:#eef0f4;
+    --surface:#ffffff;
+    --surface-2:#e4e7ee;
+    --border:#d3d8e2;
+    --text:#1b2030;
+    --muted:#5c6478;
+    --accent:#3454d1;
+    --accent-soft:#e4e9fc;
+    --good:#187a58;
+    --good-soft:#dbf3e9;
+    --bad:#af3d3d;
+    --bad-soft:#f8e3e2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14161d;
+      --surface:#1b1e28;
+      --surface-2:#232734;
+      --border:#323848;
+      --text:#e6e8ef;
+      --muted:#9198ab;
+      --accent:#7f9bff;
+      --accent-soft:#26304f;
+      --good:#4fd39c;
+      --good-soft:#1d3b31;
+      --bad:#f18585;
+      --bad-soft:#3d2426;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14161d;
+    --surface:#1b1e28;
+    --surface-2:#232734;
+    --border:#323848;
+    --text:#e6e8ef;
+    --muted:#9198ab;
+    --accent:#7f9bff;
+    --accent-soft:#26304f;
+    --good:#4fd39c;
+    --good-soft:#1d3b31;
+    --bad:#f18585;
+    --bad-soft:#3d2426;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;
+  }
+  .mono{
+    font-family:"Cascadia Code","SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    font-variant-numeric:tabular-nums;
+  }
+  .wrap{
+    max-width:860px;
+    margin:0 auto;
+    padding:0 24px 96px;
+  }
+
+  header.masthead{
+    padding:56px 0 32px;
+    border-bottom:1px solid var(--border);
+    margin-bottom:40px;
+  }
+  .eyebrow{
+    font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;
+    font-size:12.5px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin:0 0 14px;
+  }
+  h1{
+    font-size:clamp(28px,4vw,38px);
+    line-height:1.15;
+    margin:0 0 12px;
+    text-wrap:balance;
+    letter-spacing:-.01em;
+  }
+  .subhead{
+    color:var(--muted);
+    font-size:16px;
+    max-width:60ch;
+    margin:0 0 24px;
+  }
+  .meta-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .meta-chip{
+    font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;
+    font-size:12.5px;
+    color:var(--muted);
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:5px 10px;
+    font-variant-numeric:tabular-nums;
+  }
+
+  section{margin-bottom:48px;}
+  h2{
+    font-size:13px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0 0 20px;
+    font-weight:600;
+  }
+  h3{
+    font-size:19px;
+    margin:0 0 8px;
+    letter-spacing:-.005em;
+  }
+  p{margin:0 0 14px; max-width:68ch;}
+  .lede{color:var(--muted); font-size:15px;}
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:24px 26px;
+  }
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:14.5px;
+  }
+  caption{
+    text-align:left;
+    color:var(--muted);
+    font-size:13px;
+    margin-bottom:10px;
+  }
+  th,td{
+    text-align:right;
+    padding:9px 8px;
+    border-bottom:1px solid var(--border);
+    white-space:nowrap;
+  }
+  th:first-child,td:first-child{text-align:left; white-space:normal;}
+  thead th{
+    color:var(--muted);
+    font-weight:600;
+    font-size:12.5px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    border-bottom:1px solid var(--border);
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  td.winner{color:var(--good); font-weight:600;}
+  .table-scroll{overflow-x:auto;}
+
+  .specs{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:1px;
+    background:var(--border);
+    border:1px solid var(--border);
+    border-radius:12px;
+    overflow:hidden;
+  }
+  .spec{
+    background:var(--surface);
+    padding:16px 20px;
+  }
+  .spec dt{
+    font-size:11.5px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--muted);
+    margin:0 0 5px;
+  }
+  .spec dd{
+    margin:0;
+    font-size:14.5px;
+  }
+
+  .chart{
+    display:flex;
+    flex-direction:column;
+    gap:22px;
+  }
+  .chart-group h4{
+    font-size:14px;
+    margin:0 0 10px;
+    font-weight:600;
+  }
+  .bar-row{
+    display:grid;
+    grid-template-columns:112px 1fr 60px;
+    align-items:center;
+    gap:10px;
+    margin-bottom:6px;
+    font-size:13px;
+  }
+  .bar-label{color:var(--muted);}
+  .bar-track{
+    background:var(--surface-2);
+    border-radius:4px;
+    height:16px;
+    overflow:hidden;
+  }
+  .bar-fill{
+    height:100%;
+    border-radius:4px;
+  }
+  .bar-fill.base{background:var(--muted);}
+  .bar-fill.cpu{background:var(--bad);}
+  .bar-fill.gpu{background:var(--accent);}
+  .bar-val{text-align:right; font-variant-numeric:tabular-nums;}
+  .legend{display:flex; gap:18px; margin-bottom:18px; flex-wrap:wrap;}
+  .legend span{
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:12.5px; color:var(--muted);
+  }
+  .swatch{width:10px; height:10px; border-radius:2px; display:inline-block;}
+  .swatch.base{background:var(--muted);}
+  .swatch.cpu{background:var(--bad);}
+  .swatch.gpu{background:var(--accent);}
+
+  .verdict{
+    background:var(--accent-soft);
+    border:1px solid var(--accent);
+    border-radius:12px;
+    padding:22px 26px;
+  }
+  .verdict h3{color:var(--accent); font-size:15px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:12px;}
+  .verdict p{color:var(--text); margin-bottom:10px; max-width:70ch;}
+  .verdict p:last-child{margin-bottom:0;}
+
+  ul.files{list-style:none; margin:0; padding:0;}
+  ul.files li{
+    padding:10px 0;
+    border-bottom:1px solid var(--border);
+    font-size:14px;
+    display:flex;
+    gap:14px;
+    align-items:baseline;
+  }
+  ul.files li:last-child{border-bottom:none;}
+  ul.files code{
+    font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;
+    font-size:13px;
+    color:var(--accent);
+    flex:0 0 auto;
+  }
+  ul.files span{color:var(--muted); font-size:13px;}
+
+  footer{
+    color:var(--muted);
+    font-size:12.5px;
+    padding-top:24px;
+    border-top:1px solid var(--border);
+  }
+
+  @media (max-width:560px){
+    .specs{grid-template-columns:1fr;}
+    .bar-row{grid-template-columns:80px 1fr 50px;}
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Benchmark de inferencia local</p>
+    <h1>Qwen3.8-27B (Q4_K_M) en 2× RTX 3060, con y sin MTP</h1>
+    <p class="subhead">Medición de velocidad de generación y procesamiento de prompt en llama.cpp, comparando el motor puro (<span class="mono">llama-bench</span>) contra el servidor real, y evaluando si el speculative decoding con draft model (MTP) aporta en este hardware.</p>
+    <div class="meta-row">
+      <span class="meta-chip">2026-08-16</span>
+      <span class="meta-chip">llama.cpp build 3cb7ffb1a</span>
+      <span class="meta-chip">Qwen3.8-27B · 26.90B params</span>
+      <span class="meta-chip">ctx 8192</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Equipo de prueba</h2>
+    <dl class="specs">
+      <div class="spec"><dt>CPU</dt><dd>AMD Ryzen 9 7900X — 12 núcleos / 24 hilos</dd></div>
+      <div class="spec"><dt>GPU</dt><dd>2× NVIDIA RTX 3060 12&nbsp;GB — 24&nbsp;GB VRAM total, driver 576.88</dd></div>
+      <div class="spec"><dt>RAM</dt><dd>63.2&nbsp;GB</dd></div>
+      <div class="spec"><dt>Disco</dt><dd>ADATA Legend 900 — 954&nbsp;GB NVMe</dd></div>
+      <div class="spec"><dt>SO</dt><dd>Windows 11 Enterprise (build 26200)</dd></div>
+      <div class="spec"><dt>Modelo</dt><dd>ggml-org/Qwen3.8-27B-GGUF · Q4_K_M · 17.66&nbsp;GiB, <span class="mono">-ngl 999</span></dd></div>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Motor puro — llama-bench</h2>
+    <p class="lede">Sin servidor HTTP de por medio: mide el límite real del hardware con el modelo cargado, sin MTP. 3 repeticiones por punto, desviación estándar incluida.</p>
+    <div class="card table-scroll">
+      <table class="mono">
+        <thead>
+          <tr><th>Test</th><th>Tokens/s</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Prefill · pp512</td><td>556.20 ± 2.97</td></tr>
+          <tr><td>Prefill · pp2048</td><td>810.20 ± 1.99</td></tr>
+          <tr><td>Prefill · pp4096</td><td>869.84 ± 2.74</td></tr>
+          <tr><td>Generación · tg128</td><td>16.14 ± 0.07</td></tr>
+          <tr><td>Generación · tg512</td><td>16.12 ± 0.04</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Servidor real — impacto de MTP</h2>
+    <p class="lede">Tokens/segundo de generación vía <span class="mono">/completion</span> del servidor (campo <span class="mono">timings</span>), promedio de 3 corridas por prompt, en tres configuraciones: sin MTP, MTP con el draft model en CPU (config original de <span class="mono">llama-serve-qwen3.8.ps1</span>), y MTP con el draft también en GPU.</p>
+
+    <div class="card">
+      <div class="legend">
+        <span><i class="swatch base"></i>Sin MTP</span>
+        <span><i class="swatch cpu"></i>MTP · draft en CPU</span>
+        <span><i class="swatch gpu"></i>MTP · draft en GPU</span>
+      </div>
+      <div class="chart">
+
+        <div class="chart-group">
+          <h4>Prompt corto (factual, 64 tok)</h4>
+          <div class="bar-row"><span class="bar-label">Sin MTP</span><div class="bar-track"><div class="bar-fill base" style="width:99%"></div></div><span class="bar-val mono">28.07</span></div>
+          <div class="bar-row"><span class="bar-label">Draft CPU</span><div class="bar-track"><div class="bar-fill cpu" style="width:50%"></div></div><span class="bar-val mono">14.17</span></div>
+          <div class="bar-row"><span class="bar-label">Draft GPU</span><div class="bar-track"><div class="bar-fill gpu" style="width:90%"></div></div><span class="bar-val mono">25.38</span></div>
+        </div>
+
+        <div class="chart-group">
+          <h4>Prompt medio (razonamiento, 256 tok)</h4>
+          <div class="bar-row"><span class="bar-label">Sin MTP</span><div class="bar-track"><div class="bar-fill base" style="width:100%"></div></div><span class="bar-val mono">28.14</span></div>
+          <div class="bar-row"><span class="bar-label">Draft CPU</span><div class="bar-track"><div class="bar-fill cpu" style="width:46%"></div></div><span class="bar-val mono">13.05</span></div>
+          <div class="bar-row"><span class="bar-label">Draft GPU</span><div class="bar-track"><div class="bar-fill gpu" style="width:70%"></div></div><span class="bar-val mono">19.71</span></div>
+        </div>
+
+        <div class="chart-group">
+          <h4>Prompt de código (generación, 512 tok)</h4>
+          <div class="bar-row"><span class="bar-label">Sin MTP</span><div class="bar-track"><div class="bar-fill base" style="width:90%"></div></div><span class="bar-val mono">23.70</span></div>
+          <div class="bar-row"><span class="bar-label">Draft CPU</span><div class="bar-track"><div class="bar-fill cpu" style="width:54%"></div></div><span class="bar-val mono">14.10</span></div>
+          <div class="bar-row"><span class="bar-label">Draft GPU</span><div class="bar-track"><div class="bar-fill gpu" style="width:100%"></div></div><span class="bar-val mono">26.30</span></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="verdict">
+      <h3>Conclusión</h3>
+      <p><strong>La configuración original (<span class="mono">--spec-draft-ngl 0</span>, draft model en CPU) es la peor de las tres opciones</strong> — entre 41% y 54% más lenta que no usar MTP en absoluto. El costo de mover datos entre CPU y GPU para verificar cada token especulativo supera cualquier ahorro.</p>
+      <p>Moviendo el draft también a GPU (<span class="mono">--spec-draft-ngl 999</span>) se recupera la mayor parte del rendimiento perdido, e incluso <strong>supera al caso sin MTP en generación de código</strong> (26.3 vs 23.7 tok/s), pero pierde en los otros dos prompts. En este hardware — 2× RTX 3060 con un draft model MTP relativamente costoso de verificar — el speculative decoding no rinde de forma consistente.</p>
+      <p><strong>Recomendación:</strong> para uso general, correr sin MTP (~28 tok/s estables). Activar MTP con <span class="mono">--spec-draft-ngl 999</span> solo si la carga es predominantemente generación de código o texto muy predecible, donde la tasa de aceptación del draft es más alta.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Prefill (procesamiento de prompt)</h2>
+    <div class="card table-scroll">
+      <table class="mono">
+        <thead>
+          <tr><th>Prompt</th><th>Sin MTP</th><th>Draft CPU</th><th>Draft GPU</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Corto</td><td>16.49</td><td>28.06</td><td>19.34</td></tr>
+          <tr><td>Medio</td><td>30.83</td><td>23.60</td><td>29.99</td></tr>
+          <tr><td>Código</td><td>35.77</td><td>28.81</td><td>34.81</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Datos crudos</h2>
+    <div class="card">
+      <ul class="files">
+        <li><code>server-bench-base.csv</code><span>corridas individuales, sin MTP</span></li>
+        <li><code>server-bench-mtp.csv</code><span>corridas individuales, MTP con draft en CPU</span></li>
+        <li><code>server-bench-mtp-gpu.csv</code><span>corridas individuales, MTP con draft en GPU</span></li>
+        <li><code>llama-bench-baseline.json / .md</code><span>salida completa de llama-bench</span></li>
+        <li><code>sysinfo.json</code><span>especificaciones de hardware</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    Generado con <span class="mono">Run-FullBenchmark.ps1</span> · llama.cpp build 3cb7ffb1a (10453) · Qwen3.8-27B GGUF Q4_K_M
+  </footer>
+
+</div>
