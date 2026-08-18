@@ -1,0 +1,3 @@
+# Logs crudos de arranque del servidor: utiles en local para diagnosticar OOM y para leer
+# n_expert / KV size, pero son grandes y especificos de cada maquina.
+results/logs/
