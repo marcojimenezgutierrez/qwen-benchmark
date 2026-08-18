@@ -4,11 +4,14 @@ Comprehensive benchmark suite for evaluating the Qwen3.8-27B GGUF model's perfor
 
 ## Overview
 
-This suite contains three main benchmarking approaches:
+This suite contains:
 
 1. **Pure Inference Baseline** (`Bench-LlamaBench.ps1`) - llama-bench motor benchmark
-2. **Server Performance** (`Bench-Server.ps1`) - Real HTTP server /completion endpoint testing
-3. **Full Suite Orchestration** (`Run-FullBenchmark.ps1`) - Complete benchmark workflow
+2. **Server Performance** (`Bench-Server.ps1`) - Real HTTP server /completion endpoint testing, fully parameterized
+3. **Speed Sweep** (`Run-SpeedSweep.ps1`) - Compares split mode, flash attention and KV quantization
+4. **Context Sweep** (`Run-ContextSweep.ps1`) - Scales the context window to 32k and measures the cost
+5. **Report Generator** (`New-Report.ps1`) - Builds `REPORTE.md` from whatever variants exist
+6. **Full Suite Orchestration** (`Run-FullBenchmark.ps1`) - Complete benchmark workflow
 
 ## Quick Start
 
@@ -17,13 +20,28 @@ Run the complete benchmark suite:
 .\Run-FullBenchmark.ps1
 ```
 
+MTP is opt-in now (see Results Interpretation for why):
+```powershell
+.\Run-FullBenchmark.ps1 -IncludeMTP -IncludeSweeps
+```
+
 Or run individual benchmarks:
 ```powershell
 .\Get-SysInfo.ps1                           # Collect system specs
 .\Bench-LlamaBench.ps1                      # Pure llama-bench baseline
-.\Bench-Server.ps1                          # Server without MTP
-.\Bench-Server.ps1 -UseMTP -DraftNgl 0      # Server with MTP, draft on CPU
-.\Bench-Server.ps1 -UseMTP -DraftNgl 999    # Server with MTP, draft on GPU
+.\Bench-Server.ps1                          # Server, default config
+.\Bench-Server.ps1 -DryRun                  # Print the server command line and exit
+.\Bench-Server.ps1 -SplitMode row           # Both GPUs on the same layer
+.\Bench-Server.ps1 -Ctx 32768 -CacheTypeK q8_0 -CacheTypeV q8_0
+.\Bench-Server.ps1 -Ctx 32768 -NoKvOffload  # KV cache in system RAM
+.\Run-SpeedSweep.ps1                        # Full speed matrix
+.\Run-ContextSweep.ps1                      # Full context matrix
+.\New-Report.ps1                            # Regenerate REPORTE.md from existing CSVs
+```
+
+Before a long run, confirm your llama.cpp build exposes these flags:
+```powershell
+llama serve --help | findstr /i "split-mode cache-type kv-offload flash-attn"
 ```
 
 ---
@@ -65,14 +83,23 @@ Or run individual benchmarks:
 
 #### Base Configuration
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Model** | `ggml-org/Qwen3.8-27B-GGUF:Q4_K_M` | Same quantized model as baseline |
-| **Context Window** | `-c 8192` | Maximum context size (8192 tokens) |
-| **Parallel Requests** | `-np 1` | Number of parallel requests (1 = sequential) |
-| **GPU Offload** | `-ngl 999` | Full GPU acceleration |
-| **Port** | `--port 8080` | HTTP server port (customizable via `-Port` param) |
-| **No MMProj** | `--no-mmproj` | Disable multimodal projections |
+| Parameter | Default | Script param | Description |
+|-----------|---------|--------------|-------------|
+| **Model** | `ggml-org/Qwen3.8-27B-GGUF:Q4_K_M` | - | Same quantized model as baseline |
+| **Context Window** | `-c 8192` | `-Ctx` | Maximum context size |
+| **Parallel Requests** | `-np 1` | `-Parallel` | Number of parallel slots (1 = sequential) |
+| **GPU Offload** | `-ngl 999` | `-Ngl` | Full GPU acceleration |
+| **Split Mode** | `-sm layer` | `-SplitMode` | `layer` = GPUs in sequence, `row` = GPUs in parallel on the same layer |
+| **Flash Attention** | `-fa on` | `-FlashAttn` | `on`/`off`/`auto`. **Changed:** previously not passed at all, which left it at llama.cpp's `auto` |
+| **KV Cache Type** | `--cache-type-k/v f16` | `-CacheTypeK` / `-CacheTypeV` | `q8_0` halves KV memory, `q4_0` quarters it. Requires flash attention on CUDA |
+| **KV Offload** | (enabled) | `-NoKvOffload` | Passes `-nkvo`: keeps the KV cache in system RAM instead of VRAM |
+| **Tensor Split** | (auto) | `-TensorSplit` | Passes `-ts`, e.g. `1,1` to force an even split |
+| **Port** | `--port 8080` | `-Port` | HTTP server port |
+| **No MMProj** | `--no-mmproj` | - | Disable multimodal projections |
+
+> **`-fa on` is now passed explicitly.** `Bench-LlamaBench.ps1` always passed it and the server
+> never did, which made the two benchmarks not directly comparable. This changes the meaning of
+> the `base` variant relative to the historical CSVs in `results/`.
 
 #### MTP (Speculative Decoding) Configuration
 
@@ -92,6 +119,10 @@ For each test prompt:
 | **Temperature** | `0.2` | Low randomness for consistent, factual responses |
 | **n_predict** | 64/256/512 | Max tokens to generate (varies by prompt) |
 | **stream** | `false` | Get full response at once (not streaming) |
+| **cache_prompt** | `false` | **Required.** With llama.cpp's default (`true`) repetitions 2..N reuse the cached prefix and `prompt_tok_s` stops measuring prefill |
+
+A discarded warm-up request runs before the measured repetitions, so repetition 1 no longer
+absorbs CUDA and buffer initialization cost.
 
 #### Test Prompts
 
@@ -107,12 +138,26 @@ Three representative prompts test different workloads:
 
 ```powershell
 .\Bench-Server.ps1 `
-    -UseMTP $true              # Enable MTP speculative decoding [bool, default: false]
+    -UseMTP                    # Enable MTP speculative decoding [switch, default: off]
     -Repeats 3                 # Number of times to repeat each prompt [int, default: 3]
     -Port 8080                 # HTTP server port [int, default: 8080]
     -DraftNgl 0                # Draft model GPU layers (0=CPU, 999=GPU) [int, default: 0]
     -LabelOverride "mtp-gpu"   # Custom label for CSV output [string, default: auto]
+    -Ctx 8192                  # Context window [int, default: 8192]
+    -Ngl 999                   # Model GPU layers [int, default: 999]
+    -SplitMode layer           # layer|row|none [string, default: layer]
+    -CacheTypeK f16            # KV cache K type [string, default: f16]
+    -CacheTypeV f16            # KV cache V type [string, default: f16]
+    -Parallel 1                # Server slots, -np [int, default: 1]
+    -NoKvOffload               # Keep KV cache in system RAM [switch, default: off]
+    -FlashAttn on              # on|off|auto [string, default: on]
+    -TensorSplit "1,1"         # Tensor split across GPUs [string, default: auto]
+    -DryRun                    # Print the command line and exit without loading the model
 ```
+
+When `-LabelOverride` is omitted the label is derived from whatever differs from the defaults
+(`base`, `base-ctx32k-kvq80`, `base-smrow-ram`, ...), so sweep variants never overwrite each
+other's CSV.
 
 **Metrics Collected:**
 
@@ -130,6 +175,14 @@ For each request:
 | `gen_ms` | Time to generate tokens (milliseconds) |
 | `gen_tok_s` | **Generation speed (tokens/second)** - main metric |
 | `wall_ms` | Total wall-clock time including overhead |
+| `status` | `ok`, `oom`, `load-failed` or `no-data`. A config that cannot load is recorded as a row, not an abort |
+| `kv_size_mib` | KV cache size parsed from the server load log |
+| `vram_used_mib` | Total VRAM in use while the server was up, via `nvidia-smi` |
+| `ctx`, `ngl`, `split_mode`, `cache_k`, `cache_v`, `parallel`, `nkvo`, `flash_attn` | The configuration that produced the row, so the CSV is self-describing |
+
+Server load logs are kept per variant in `results/logs/server-<label>.{out,err}.log`, and the
+model's architecture (`n_expert`, `n_layer`, `n_head_kv`, KV size) is extracted once into
+`results/model-info.json`.
 
 **Output Files:**
 - `results/server-bench-base.csv` - Without MTP
@@ -140,35 +193,31 @@ For each request:
 
 ### 3. Full Benchmark Suite (`Run-FullBenchmark.ps1`)
 
-**Workflow:**
+**Workflow (default):**
 
 ```
-1. Get-SysInfo.ps1
-   ├─ Collects CPU, RAM, GPU, OS, disk info
-   └─ Outputs: results/sysinfo.json
-
-2. Bench-LlamaBench.ps1
-   └─ Outputs: results/llama-bench-baseline.{json,md}
-
-3. Bench-Server.ps1 (no args)
-   └─ Outputs: results/server-bench-base.csv
-
-4. Bench-Server.ps1 -UseMTP -DraftNgl 0
-   └─ Outputs: results/server-bench-mtp.csv
-
-5. Bench-Server.ps1 -UseMTP -DraftNgl 999 -LabelOverride "mtp-gpu"
-   └─ Outputs: results/server-bench-mtp-gpu.csv
-
-6. Generate report
-   └─ Outputs: results/REPORTE.md
+1. Get-SysInfo.ps1        -> results/sysinfo.json
+2. Bench-LlamaBench.ps1   -> results/llama-bench-baseline.{json,md}
+3. Bench-Server.ps1       -> results/server-bench-base.csv
+4. New-Report.ps1         -> results/REPORTE.md
 ```
 
-Generates consolidated `REPORTE.md` with:
+`-IncludeMTP` adds the two MTP variants. `-IncludeSweeps` adds `Run-SpeedSweep.ps1` and
+`Run-ContextSweep.ps1`. Both are off by default: MTP because the measurements below show it
+never wins, sweeps because they take considerably longer than the base run.
+
+`New-Report.ps1` discovers every `results/server-bench-*.csv` by glob and pivots them
+dynamically, so any variant you run shows up without touching the generator. It reports the
+**median** as the headline number, with min/max/mean alongside — see Results Interpretation for
+why the mean was actively misleading here. It generates:
+
 - Hardware/software summary
-- Comparison table: generation speed (tok/s) across all variants
-- Prompt processing speeds (prefill performance)
-- Full llama-bench results
-- Raw data file references
+- Per-variant summary ranked by median generation speed
+- Per-load detail with an outlier flag when mean and median diverge by more than 5%
+- Prefill speeds, with an automatic validity check on `prompt_tokens`
+- Context vs speed and memory, including configs that failed to load
+- Model architecture and an implied-bandwidth cross-check between llama-bench and the server
+- Full llama-bench results and raw data references
 
 ---
 
@@ -217,20 +266,41 @@ mtp-Qwen3.8-27B-Q4_0.gguf
 
 ### Key Findings (Test System Example)
 
-**Generation Speed Comparison:**
+**Generation Speed Comparison** (median of 3 repetitions, from the CSVs in `results/`):
 
 | Prompt | No MTP | MTP (CPU) | MTP (GPU) | Best |
 |--------|--------|-----------|-----------|------|
-| Short factual | 28.1 tok/s | 14.2 tok/s ⚠️ | 25.4 tok/s | No MTP |
-| Medium reasoning | 28.1 tok/s | 13.1 tok/s ⚠️ | 19.7 tok/s | No MTP |
-| Code generation | 23.7 tok/s | 14.1 tok/s ⚠️ | **26.3 tok/s** ✓ | MTP (GPU) |
+| Short factual | **27.77 tok/s** | 13.78 tok/s | 24.10 tok/s | No MTP |
+| Medium reasoning | **27.71 tok/s** | 13.20 tok/s | 20.06 tok/s | No MTP |
+| Code generation | **26.56 tok/s** | 14.07 tok/s | 25.23 tok/s | No MTP |
+
+> **Correction.** Earlier versions of this table and of `REPORTE.md` used the mean and concluded
+> that MTP-on-GPU was the best option for code generation (26.3 vs 23.7 tok/s). That was an
+> artifact of a single outlier: `base/codigo/rep3` took 28.7 s against ~19.1 s for the other two
+> repetitions, dragging the mean from 26.6 down to 23.7. Using the median, **no-MTP wins all
+> three loads** and there is no case in this data where MTP helps. The report generator now
+> reports medians and flags any group whose mean diverges from its median by more than 5%.
 
 **Insights:**
 
-- **MTP with draft on CPU (`--spec-draft-ngl 0`)**: Consistently slower due to CPU↔GPU data movement overhead
-- **MTP with draft on GPU (`--spec-draft-ngl 999`)**: Recovers performance; sometimes exceeds no-MTP baseline
-- **Best for general use**: No MTP (~28 tok/s average) provides most consistent throughput
-- **Best for code**: MTP with draft on GPU can achieve marginally higher speeds on predictable generation
+- **MTP with draft on CPU (`--spec-draft-ngl 0`)**: loses half the throughput to CPU↔GPU data movement. Unambiguously the worst option.
+- **MTP with draft on GPU (`--spec-draft-ngl 999`)**: recovers most of it but still never beats the baseline, and is far noisier (24.23-29.44 tok/s within a single load).
+- **Best for all three loads**: no MTP. This is why MTP is opt-in.
+
+**Two caveats on the historical numbers above:**
+
+1. They were collected with `cache_prompt` at its default of `true`, so `prompt_tokens` runs
+   `23, 4, 4` across repetitions and the prefill figures measure cache hits, not prefill. The
+   older "prefill" table in `REPORTE.md` (10-12 tok/s) should be ignored; `llama-bench` measures
+   556-869 tok/s on the same work. Fixed in the current script.
+2. The server reports ~28 tok/s while `llama-bench` reports tg128 = 16.14 ± 0.07 tok/s on the
+   same model and hardware — a 74% gap that is not yet explained. The model is 18.96 GB, so
+   28 tok/s implies reading 531 GB/s; one RTX 3060 has ~360 GB/s and `-sm layer` runs the GPUs
+   in sequence rather than in parallel. If the model is dense that figure is not physically
+   possible and one of the two measurements is wrong; if it is MoE, only a fraction of the
+   weights is read per token and both can be valid. `New-Report.ps1` now prints this
+   cross-check, and `results/model-info.json` records `n_expert` to settle it. **Resolve this
+   before drawing conclusions from either number.**
 
 ### Metrics Explained
 
@@ -249,7 +319,7 @@ mtp-Qwen3.8-27B-Q4_0.gguf
 
 **Test a specific prompt with different parameters:**
 ```powershell
-# Increase context window
+# More repetitions (the median gets more reliable with 5+)
 .\Bench-Server.ps1 -Repeats 5
 
 # Test on different port (useful for multiple instances)
@@ -257,7 +327,14 @@ mtp-Qwen3.8-27B-Q4_0.gguf
 
 # Enable MTP with GPU draft, 5 repetitions, custom label
 .\Bench-Server.ps1 -UseMTP -DraftNgl 999 -Repeats 5 -LabelOverride "custom-test"
+
+# 32k context with a quantized KV cache, both GPUs on the same layer
+.\Bench-Server.ps1 -Ctx 32768 -CacheTypeK q8_0 -CacheTypeV q8_0 -SplitMode row
 ```
+
+**Editing a sweep:** both sweep scripts hold their matrix in a `$variants` array of
+`@{ Label; Args; Nota }` entries, where `Args` is splatted into `Bench-Server.ps1`. Adding a
+configuration is one line, and `New-Report.ps1` picks it up with no changes.
 
 ### Modifying llama-bench Parameters
 
@@ -320,20 +397,43 @@ $prompts = @(
 | `sysinfo.json` | Hardware/OS specs | JSON |
 | `llama-bench-baseline.json` | Pure inference results | JSON |
 | `llama-bench-baseline.md` | Baseline formatted results | Markdown table |
-| `server-bench-base.csv` | Server benchmark without MTP | CSV (one row per request) |
-| `server-bench-mtp.csv` | Server benchmark with MTP (CPU draft) | CSV |
-| `server-bench-mtp-gpu.csv` | Server benchmark with MTP (GPU draft) | CSV |
+| `server-bench-<label>.csv` | One file per variant, one row per request, self-describing | CSV |
+| `model-info.json` | Model architecture parsed from the server load log | JSON |
+| `logs/server-<label>.{out,err}.log` | Raw server startup logs per variant | Text |
 | `REPORTE.md` | Consolidated report | Markdown with tables & summary |
+
+The pre-existing `server-bench-base.csv`, `server-bench-mtp.csv` and `server-bench-mtp-gpu.csv`
+were collected before the `cache_prompt` fix and lack the configuration columns. They still load
+in `New-Report.ps1` and show `-` in those columns, which marks them as older data.
 
 ---
 
 ## Performance Tuning Tips
 
-1. **Increase parallel requests** (modify `-np` in `Bench-Server.ps1`): Better GPU utilization
-2. **Increase context window** (modify `-c` parameter): May affect performance
-3. **Test different quantizations**: Replace model in parameters to test Q3_K, Q5_K_M, etc.
-4. **Adjust temperature**: Lower = faster but more deterministic; higher = slower but more creative
-5. **Monitor GPU memory**: Use `nvidia-smi -l 1` during benchmarks
+Ordered by expected payoff on this 2x RTX 3060 system:
+
+1. **`-SplitMode row`** - the largest untested lever. With `layer` (the default) GPU 0 processes
+   its layers and *then* GPU 1 processes its own; they never work at the same time, so you pay
+   for two cards and get the memory bandwidth of one. With `row` both work on the same layer and
+   the bandwidth adds up. The risk is that inter-GPU traffic over PCIe eats the gain, which is
+   exactly what `Run-SpeedSweep.ps1` exists to measure.
+2. **Quantize the KV cache** (`-CacheTypeK q8_0 -CacheTypeV q8_0`) - roughly halves KV memory at
+   negligible quality cost, which buys context without touching RAM. Requires flash attention.
+3. **Lighter model quantization** (IQ4_XS, Q4_K_S) - if generation is bandwidth-bound, tok/s
+   scales almost linearly with bytes read per token. IQ4_XS is ~12% smaller than Q4_K_M. Not
+   covered by the sweeps because it needs a different model download.
+4. **`-Parallel 4`** - only helps *aggregate* throughput across concurrent clients, not
+   single-request latency. This suite measures single-user latency, so the flag is exposed but
+   the sweeps do not use it.
+5. **KV cache in RAM** (`-NoKvOffload`) - the way to get a large context when VRAM runs out, but
+   every generated token then pulls the KV cache over PCIe (~25-30 GB/s) instead of reading it
+   from VRAM (~360 GB/s). `Run-ContextSweep.ps1` quantifies the cost.
+6. **Monitor GPU memory**: `nvidia-smi -l 1` during benchmarks.
+
+**Avoid the Windows CUDA Sysmem Fallback** (NVIDIA Control Panel -> Manage 3D Settings) for
+benchmarking. It spills VRAM into RAM implicitly, the driver decides what to evict, and results
+become inconsistent between runs. Set it to "Prefer No Sysmem Fallback" so an OOM is a visible
+OOM instead of a silent performance collapse — `Bench-Server.ps1` records OOM as a data point.
 
 ---
 
@@ -347,8 +447,8 @@ $prompts = @(
 
 ## Version Info
 
-- **Suite Version**: 1.0
+- **Suite Version**: 2.0 (parameterized server config, sweeps, median-based reporting)
 - **Model**: Qwen3.8-27B GGUF Q4_K_M
 - **Tested on**: Windows 11, llama.cpp 3cb7ffb1a
 
-Last updated: 2026-01-17
+Last updated: 2026-08-18
