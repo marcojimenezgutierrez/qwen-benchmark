@@ -1,0 +1,4 @@
+﻿"variant","prompt","rep","prompt_tokens","prompt_ms","prompt_tok_s","gen_tokens","gen_ms","gen_tok_s","wall_ms","status","detail","kv_size_mib","vram_used_mib","ctx","ngl","split_mode","cache_k","cache_v","parallel","nkvo","flash_attn","temp","top_p","top_k","min_p","presence_penalty","reasoning_effort"
+"reff-low-notrunc","corto","1","63","536.1","117.52","124","7623.3","16.13","8162.4","ok","",,"20462","8192","999","layer","f16","f16","1","False","on","1","0.95","20","0","0","low"
+"reff-low-notrunc","medio","1","63","540.2","116.62","3433","228482.3","15.02","229179.9","ok","",,"20462","8192","999","layer","f16","f16","1","False","on","1","0.95","20","0","0","low"
+"reff-low-notrunc","codigo","1","70","559.6","125.10","1467","92017.6","15.93","92948.1","ok","",,"20462","8192","999","layer","f16","f16","1","False","on","1","0.95","20","0","0","low"

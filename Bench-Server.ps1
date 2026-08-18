@@ -6,7 +6,7 @@ param(
     [string]$LabelOverride = "",
 
     # --- Configuracion del servidor (todo parametrizable para poder barrer variantes) ---
-    [int]$Ctx = 8192,
+    [int]$Ctx = 16384,
     [int]$Ngl = 999,
     [ValidateSet("layer", "row", "none")][string]$SplitMode = "layer",
     [string]$CacheTypeK = "f16",
@@ -15,6 +15,14 @@ param(
     [switch]$NoKvOffload,
     [ValidateSet("on", "off", "auto")][string]$FlashAttn = "on",
     [string]$TensorSplit = "",
+
+    # --- Sampling y razonamiento, recomendados por Unsloth para Qwen3.8-27B (modo thinking) ---
+    [double]$Temp = 1.0,
+    [double]$TopP = 0.95,
+    [int]$TopK = 20,
+    [double]$MinP = 0.0,
+    [double]$PresencePenalty = 0.0,
+    [string]$ReasoningEffort = "",
 
     [switch]$DryRun
 )
@@ -26,7 +34,11 @@ param(
 # pasa explicitamente para que el servidor sea comparable con Bench-LlamaBench.ps1 (ver README).
 
 $llama = "$env:LOCALAPPDATA\Microsoft\WindowsApps\llama.exe"
-$modelRepo = "ggml-org/Qwen3.8-27B-GGUF:Q4_K_M"
+# unsloth/Qwen3.8-27B-GGUF trae MTP incorporado en el propio gguf (self-speculative decoding),
+# a diferencia de ggml-org que requeria un gguf de draft model aparte. -UseMTP/-DraftNgl quedan
+# del esquema viejo (ggml-org) y no aplican a este repo: MTP se usa automaticamente si el build
+# de llama.cpp lo soporta, sin flags extra.
+$modelRepo = "unsloth/Qwen3.8-27B-GGUF:Q4_K_M"
 $draftModel = "$env:USERPROFILE\.cache\huggingface\hub\models--ggml-org--Qwen3.8-27B-GGUF\snapshots\0669b98607d47046c7c2b3f801011d54a08cfccf\mtp-Qwen3.8-27B-Q4_0.gguf"
 $resultsDir = "$PSScriptRoot\results"
 $logsDir = "$resultsDir\logs"
@@ -39,7 +51,7 @@ New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
 function New-VariantLabel {
     $parts = @()
     if ($UseMTP) { $parts += $(if ($DraftNgl -gt 0) { "mtp-gpu" } else { "mtp" }) } else { $parts += "base" }
-    if ($Ctx -ne 8192)      { $parts += "ctx$([math]::Round($Ctx / 1024))k" }
+    if ($Ctx -ne 16384)     { $parts += "ctx$([math]::Round($Ctx / 1024))k" }
     if ($SplitMode -ne "layer") { $parts += "sm$SplitMode" }
     if ($CacheTypeK -ne "f16" -or $CacheTypeV -ne "f16") {
         $ck = $CacheTypeK.Replace("_", "")
@@ -50,6 +62,7 @@ function New-VariantLabel {
     if ($Parallel -ne 1)    { $parts += "np$Parallel" }
     if ($FlashAttn -ne "on"){ $parts += "fa$FlashAttn" }
     if ($Ngl -ne 999)       { $parts += "ngl$Ngl" }
+    if ($ReasoningEffort)   { $parts += "reff$ReasoningEffort" }
     return ($parts -join "-")
 }
 
@@ -68,6 +81,7 @@ $serverArgs = @(
 )
 if ($NoKvOffload) { $serverArgs += "-nkvo" }
 if ($TensorSplit) { $serverArgs += @("-ts", $TensorSplit) }
+if ($ReasoningEffort) { $serverArgs += @("--chat-template-kwargs", "{\`"reasoning_effort\`":\`"$ReasoningEffort\`"}") }
 if ($UseMTP) {
     $serverArgs += @("--spec-draft-model", $draftModel, "--spec-type", "draft-mtp", "--spec-draft-ngl", "$DraftNgl")
 }
@@ -90,6 +104,12 @@ $cfg = [ordered]@{
     parallel    = $Parallel
     nkvo        = [bool]$NoKvOffload
     flash_attn  = $FlashAttn
+    temp        = $Temp
+    top_p       = $TopP
+    top_k       = $TopK
+    min_p       = $MinP
+    presence_penalty = $PresencePenalty
+    reasoning_effort  = $ReasoningEffort
 }
 
 # [ordered] no soporta el operador + como si lo hace [hashtable], asi que se fusiona a mano
@@ -202,24 +222,52 @@ if ($facts.Contains("n_layer")) {
 
 # --- Prompts ----------------------------------------------------------------------------
 # Prompts representativos: corto/factual, medio/razonamiento, largo/generacion de codigo.
+#
+# n_predict ya no trunca la respuesta a un tamano fijo: se deja que el modelo pare solo (EOS)
+# para poder medir cuantos tokens usa realmente, incluido el thinking trace. El tope de 4096
+# es solo una red de seguridad por si un prompt no genera un token de parada.
 $prompts = @(
-    @{ name = "corto";  text = "Cual es la capital de Francia y por que es importante historicamente? Responde en 2 oraciones."; n_predict = 64 },
-    @{ name = "medio";  text = "Explica paso a paso como funciona el mecanismo de atencion en los transformers, con un ejemplo numerico simple."; n_predict = 256 },
-    @{ name = "codigo"; text = "Escribe en Python una funcion que implemente quicksort, con comentarios explicando cada paso, y luego una funcion de test con 5 casos."; n_predict = 512 }
+    @{ name = "corto";  text = "Cual es la capital de Francia y por que es importante historicamente? Responde en 2 oraciones."; n_predict = 8192 },
+    @{ name = "medio";  text = "Explica paso a paso como funciona el mecanismo de atencion en los transformers, con un ejemplo numerico simple."; n_predict = 8192 },
+    @{ name = "codigo"; text = "Escribe en Python una funcion que implemente quicksort, con comentarios explicando cada paso, y luego una funcion de test con 5 casos."; n_predict = 8192 }
 )
 
 function Invoke-Completion {
     param([string]$Text, [int]$NPredict)
     # cache_prompt=false es obligatorio: con el default (true) las repeticiones 2..N reusan el
     # prefijo cacheado y prompt_tok_s deja de medir prefill.
-    $body = @{
-        prompt       = $Text
-        n_predict    = $NPredict
-        temperature  = 0.2
-        stream       = $false
-        cache_prompt = $false
-    } | ConvertTo-Json
-    return Invoke-RestMethod -Uri "$baseUrl/completion" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 600
+    #
+    # --reasoning_effort solo se aplica via la plantilla de chat (--chat-template-kwargs es un
+    # flag de servidor que la renderiza), asi que si esta seteado usamos /v1/chat/completions en
+    # vez de /completion (texto crudo, sin plantilla) para que realmente tenga efecto.
+    if ($ReasoningEffort) {
+        $body = @{
+            messages         = @(@{ role = "user"; content = $Text })
+            max_tokens       = $NPredict
+            temperature      = $Temp
+            top_p            = $TopP
+            top_k            = $TopK
+            min_p            = $MinP
+            presence_penalty = $PresencePenalty
+            stream           = $false
+            cache_prompt     = $false
+        } | ConvertTo-Json
+        $resp = Invoke-RestMethod -Uri "$baseUrl/v1/chat/completions" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 600
+    } else {
+        $body = @{
+            prompt           = $Text
+            n_predict        = $NPredict
+            temperature      = $Temp
+            top_p            = $TopP
+            top_k            = $TopK
+            min_p            = $MinP
+            presence_penalty = $PresencePenalty
+            stream           = $false
+            cache_prompt     = $false
+        } | ConvertTo-Json
+        $resp = Invoke-RestMethod -Uri "$baseUrl/completion" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 600
+    }
+    return $resp
 }
 
 # Calentamiento descartado: la primera peticion paga inicializacion de CUDA y buffers.
